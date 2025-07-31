@@ -1,8 +1,8 @@
-using Oat.IO.DeltaCompression.Tests.Contexts;
-using Oat.IO.DeltaCompression.Tests.States;
+using OatIM.DeltaCompression.Tests.Contexts;
+using OatIM.DeltaCompression.Tests.States;
 using System.IO.Pipelines;
 
-namespace Oat.IO.DeltaCompression.Tests;
+namespace OatIM.DeltaCompression.Tests;
 
 [TestClass]
 public class DeltaCompressorTests

@@ -18,7 +18,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Oat.IO.DeltaCompression.csproj" />
+    <ProjectReference Include="..\src\OatIM.DeltaCompression.csproj" />
   </ItemGroup>
 
 </Project>

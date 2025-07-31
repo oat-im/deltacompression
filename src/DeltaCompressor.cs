@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.IO.Pipelines;
 
-namespace Oat.IO.DeltaCompression;
+namespace OatIM.DeltaCompression;
 
 /// <summary>
 /// Orchestrates the delta compression and decompression of an array of IDeltaSerializable objects.

@@ -1,7 +1,7 @@
 using System.Buffers;
 using System.IO.Pipelines;
 
-namespace Oat.IO.DeltaCompression;
+namespace OatIM.DeltaCompression;
 
 /// <summary>
 /// Provides a contract for a context object that contains global data for a delta compression packet.

@@ -2,7 +2,7 @@ using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Pipelines;
 
-namespace Oat.IO.DeltaCompression.Tests.Contexts;
+namespace OatIM.DeltaCompression.Tests.Contexts;
 
 /// <summary>
 /// A test implementation of a delta context object.

@@ -1,4 +1,4 @@
-# Oat.IO.DeltaCompression
+# OatIM.DeltaCompression
 
 A generic, high-performance .NET library for delta-compressing arrays of state objects, designed for use with `System.IO.Pipelines`. This library is ideal for reducing network bandwidth in real-time applications like multiplayer games or data synchronization services.
 
@@ -38,13 +38,13 @@ You can install the package from the public NuGet gallery.
 
 **.NET CLI**
 ```bash
-dotnet add package Oat.IO.DeltaCompression
+dotnet add package OatIM.DeltaCompression
 ````
 
 **Package Manager**
 
 ```powershell
-Install-Package Oat.IO.DeltaCompression
+Install-Package OatIM.DeltaCompression
 ```
 
 -----
@@ -59,7 +59,7 @@ First, define the `struct` that holds your data. A private `[Flags]` enum is a c
 
 ```csharp
 // ShipState.cs
-using Oat.IO.DeltaCompression;
+using OatIM.DeltaCompression;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Pipelines;
@@ -89,14 +89,14 @@ public struct ShipState : IDeltaSerializable<ShipState, GlobalTickContext>
 This method is the heart of the delta calculation. It compares the `oldState` to the current state and builds a bitmask of every field that has changed. The `DeltaCompressor` uses this mask to determine if an update is needed at all.
 
 ```csharp
-    public ulong GetChangeMask(ShipState oldState, GlobalTickContext context)
-    {
-        ChangeMask mask = ChangeMask.None;
-        if (PosX != oldState.PosX) mask |= ChangeMask.PosX;
-        if (PosY != oldState.PosY) mask |= ChangeMask.PosY;
-        if (Yaw != oldState.Yaw) mask |= ChangeMask.Yaw;
-        return (ulong)mask;
-    }
+public ulong GetChangeMask(ShipState oldState, GlobalTickContext context)
+{
+    ChangeMask mask = ChangeMask.None;
+    if (PosX != oldState.PosX) mask |= ChangeMask.PosX;
+    if (PosY != oldState.PosY) mask |= ChangeMask.PosY;
+    if (Yaw != oldState.Yaw) mask |= ChangeMask.Yaw;
+    return (ulong)mask;
+}
 ```
 
 ### Step 3: Implement `WriteDelta`
@@ -104,28 +104,28 @@ This method is the heart of the delta calculation. It compares the `oldState` to
 This method serializes only the changed fields to the network stream. It checks which bits are set in the `changeMask` and writes the corresponding property values to the `PipeWriter`.
 
 ```csharp
-    public void WriteDelta(ref PipeWriter writer, ulong changeMask)
+public void WriteDelta(ref PipeWriter writer, ulong changeMask)
+{
+    var mask = (ChangeMask)changeMask;
+    if (mask.HasFlag(ChangeMask.PosX))
     {
-        var mask = (ChangeMask)changeMask;
-        if (mask.HasFlag(ChangeMask.PosX))
-        {
-            var span = writer.GetSpan(sizeof(int));
-            BinaryPrimitives.WriteInt32LittleEndian(span, PosX);
-            writer.Advance(sizeof(int));
-        }
-        if (mask.HasFlag(ChangeMask.PosY))
-        {
-            var span = writer.GetSpan(sizeof(int));
-            BinaryPrimitives.WriteInt32LittleEndian(span, PosY);
-            writer.Advance(sizeof(int));
-        }
-        if (mask.HasFlag(ChangeMask.Yaw))
-        {
-            var span = writer.GetSpan(sizeof(ushort));
-            BinaryPrimitives.WriteUInt16LittleEndian(span, Yaw);
-            writer.Advance(sizeof(ushort));
-        }
+        var span = writer.GetSpan(sizeof(int));
+        BinaryPrimitives.WriteInt32LittleEndian(span, PosX);
+        writer.Advance(sizeof(int));
     }
+    if (mask.HasFlag(ChangeMask.PosY))
+    {
+        var span = writer.GetSpan(sizeof(int));
+        BinaryPrimitives.WriteInt32LittleEndian(span, PosY);
+        writer.Advance(sizeof(int));
+    }
+    if (mask.HasFlag(ChangeMask.Yaw))
+    {
+        var span = writer.GetSpan(sizeof(ushort));
+        BinaryPrimitives.WriteUInt16LittleEndian(span, Yaw);
+        writer.Advance(sizeof(ushort));
+    }
+}
 ```
 
 ### Step 4: Implement `ApplyDelta`
@@ -133,25 +133,25 @@ This method serializes only the changed fields to the network stream. It checks 
 This is the inverse of `WriteDelta`. On the receiving end, this method reads the values for the changed fields from the `SequenceReader<byte>` and applies them to the struct's properties.
 
 ```csharp
-    public void ApplyDelta(ref SequenceReader<byte> reader, ulong changeMask)
+public void ApplyDelta(ref SequenceReader<byte> reader, ulong changeMask)
+{
+    var mask = (ChangeMask)changeMask;
+    if (mask.HasFlag(ChangeMask.PosX))
     {
-        var mask = (ChangeMask)changeMask;
-        if (mask.HasFlag(ChangeMask.PosX))
-        {
-            reader.TryReadLittleEndian(out int val);
-            PosX = val;
-        }
-        if (mask.HasFlag(ChangeMask.PosY))
-        {
-            reader.TryReadLittleEndian(out int val);
-            PosY = val;
-        }
-        if (mask.HasFlag(ChangeMask.Yaw))
-        {
-            reader.TryReadLittleEndian(out short val); // Read as signed
-            Yaw = (ushort)val; // Cast to unsigned
-        }
+        reader.TryReadLittleEndian(out int val);
+        PosX = val;
     }
+    if (mask.HasFlag(ChangeMask.PosY))
+    {
+        reader.TryReadLittleEndian(out int val);
+        PosY = val;
+    }
+    if (mask.HasFlag(ChangeMask.Yaw))
+    {
+        reader.TryReadLittleEndian(out short val); // Read as signed
+        Yaw = (ushort)val; // Cast to unsigned
+    }
+}
 ```
 
 ### Step 5: Implement `GetDeltaSize`
@@ -159,15 +159,15 @@ This is the inverse of `WriteDelta`. On the receiving end, this method reads the
 This method is crucial for the `DeltaCompressor` to validate that a received packet is complete before trying to parse it. It calculates the exact byte size of a delta payload based on a given `changeMask`.
 
 ```csharp
-    public int GetDeltaSize(ulong changeMask)
-    {
-        var mask = (ChangeMask)changeMask;
-        int size = 0;
-        if (mask.HasFlag(ChangeMask.PosX)) size += sizeof(int);
-        if (mask.HasFlag(ChangeMask.PosY)) size += sizeof(int);
-        if (mask.HasFlag(ChangeMask.Yaw)) size += sizeof(ushort);
-        return size;
-    }
+public int GetDeltaSize(ulong changeMask)
+{
+    var mask = (ChangeMask)changeMask;
+    int size = 0;
+    if (mask.HasFlag(ChangeMask.PosX)) size += sizeof(int);
+    if (mask.HasFlag(ChangeMask.PosY)) size += sizeof(int);
+    if (mask.HasFlag(ChangeMask.Yaw)) size += sizeof(ushort);
+    return size;
+}
 ```
 
 ### Step 6: Implement `ApplyContext`
@@ -175,10 +175,10 @@ This method is crucial for the `DeltaCompressor` to validate that a received pac
 This method applies the global packet context to the state object. It's called on *every* object in the array, even those that had no other changes, ensuring global data like a tick is always synchronized.
 
 ```csharp
-    public void ApplyContext(GlobalTickContext context)
-    {
-        this.LastUpdatedTick = context.GlobalTick;
-    }
+public void ApplyContext(GlobalTickContext context)
+{
+    this.LastUpdatedTick = context.GlobalTick;
+}
 ```
 
 ### Step 7: Define Your Context
@@ -249,7 +249,7 @@ async Task OnDataReceived(PipeReader networkReader)
 }
 ```
 
-> **Note:** For a complete, working example of a `struct` and `context` implementation, see the [`ShipState.cs`](https://www.google.com/search?q=tests/States/ShipState.cs) and [`GlobalTickContext.cs`](https://www.google.com/search?q=tests/Contexts/GlobalTickContext.cs) files in the test project.
+> **Note:** For a complete, working example of a `struct` and `context` implementation, see the [`ShipState.cs`](tests/States/ShipState.cs) and [`GlobalTickContext.cs`](tests/Contexts/GlobalTickContext.cs) files in the test project.
 
 -----
 
@@ -259,7 +259,7 @@ To build the library yourself, clone the repository and use the .NET CLI.
 
 ```bash
 # Clone the repository
-git clone [https://github.com/oat-im/deltacompression.git](https://github.com/oat-im/deltacompression.git)
+git clone https://github.com/oat-im/deltacompression.git
 cd deltacompression
 
 # Restore dependencies and build in Release configuration

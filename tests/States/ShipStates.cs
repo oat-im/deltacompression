@@ -1,9 +1,9 @@
-using Oat.IO.DeltaCompression.Tests.Contexts;
+using OatIM.DeltaCompression.Tests.Contexts;
 using System.Buffers;
 using System.Buffers.Binary;
 using System.IO.Pipelines;
 
-namespace Oat.IO.DeltaCompression.Tests.States;
+namespace OatIM.DeltaCompression.Tests.States;
 
 /// <summary>
 /// A test implementation of a delta-serializable game state object.
