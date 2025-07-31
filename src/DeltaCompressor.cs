@@ -133,25 +133,23 @@ public class DeltaCompressor<T, TContext>
     /// <param name="reader">The PipeReader to read the delta packet from.</param>
     public async Task ApplyDeltaPacketAsync(PipeReader reader)
     {
-        while (true)
+        ReadResult result;
+        do
         {
-            var result = await reader.ReadAsync();
+            result = await reader.ReadAsync();
             var buffer = result.Buffer;
             var sequenceReader = new SequenceReader<byte>(buffer);
             var consumed = buffer.Start;
 
-            // Parse as many packets as possible
-            while (TryReadAndApplyPacket(ref sequenceReader, out var endPosition))
+            // parse as many complete packets as are currently in the buffer
+            while (TryReadAndApplyPacket(ref sequenceReader, out var end))
             {
-                consumed = endPosition;
+                consumed = end;
             }
 
             reader.AdvanceTo(consumed, sequenceReader.Position);
-            if (result.IsCompleted)
-            {
-                break; // No more data to read.
-            }
-        }
+
+        } while (!result.IsCompleted);   // ← only exit here
     }
 
     private bool TryReadAndApplyPacket(ref SequenceReader<byte> reader, out SequencePosition endPosition)
@@ -200,7 +198,7 @@ public class DeltaCompressor<T, TContext>
             }
 
             int index = checked((int)rawIndex);
-            if (index < 0 || index >= _currentState.Length)
+            if ((uint)index >= (uint)_currentState.Length)
             {
                 throw new InvalidOperationException($"Index {index} is out of bounds for the current state array of length {_currentState.Length}.");
             }

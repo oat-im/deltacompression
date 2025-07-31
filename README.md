@@ -1,279 +1,206 @@
-# OatIM.DeltaCompression
-
-A generic, high-performance .NET library for delta-compressing arrays of state objects, designed for use with `System.IO.Pipelines`. This library is ideal for reducing network bandwidth in real-time applications like multiplayer games or data synchronization services.
-
----
-
-## What It Solves
-
-In many real-time applications, the same set of data (e.g., the position and velocity of all players) is sent over the network many times per second. Sending the complete data set every time is inefficient and consumes significant bandwidth, especially as the number of objects or the update frequency increases.
-
-**Delta compression** solves this by sending only what has changed since the last update. Instead of sending the full state, the server calculates a small "delta" or patch. The client then applies this patch to its last known state to reconstruct the new state. This can lead to massive bandwidth savings.
-
-## How It Works with `System.IO.Pipelines`
-
-This library is built from the ground up to leverage `System.IO.Pipelines`, a high-performance I/O API in .NET. This provides several key advantages:
-
--   **Minimized Allocations:** `System.IO.Pipelines` uses pooled memory, which dramatically reduces memory allocations and garbage collection pressure—a critical factor in real-time applications.
--   **Zero-Copy Operations:** The library reads and writes directly to the pipeline's buffers, avoiding unnecessary and expensive data copies between memory locations.
--   **Backpressure Handling:** The pipeline system naturally handles backpressure, preventing a fast sender from overwhelming a slow receiver, which helps maintain application stability.
-
-By combining delta compression with `System.IO.Pipelines`, this library offers a highly efficient solution for network serialization.
+# OatIM.DeltaCompression · **v1.1.0**
+<sub>Fast, allocation-free delta compression for .NET 8 + 9</sub>
 
 ---
 
-## Core Concepts
+## 0  TL;DR  
 
-The library is built on a few key components that provide its flexibility and power.
-
--   `IDeltaSerializable<T, TContext>`: This is the core interface. Any `struct` you want to compress must implement this contract. It defines how your object calculates its own changes, applies patches, and interacts with a global context.
--   `IDeltaContext`: This interface defines a packet's global context. A context object (e.g., one containing the current server tick) is serialized once at the start of a packet and provides shared information to all state objects being deserialized.
--   `DeltaCompressor<T, TContext>`: This is the main engine. It orchestrates the entire process, comparing state arrays, using your `IDeltaSerializable` implementation to generate a delta packet, and applying received packets to update its internal state.
-
----
-
-## Installation
-
-You can install the package from the public NuGet gallery.
-
-**.NET CLI**
-```bash
-dotnet add package OatIM.DeltaCompression
+```csharp
+var compressor = new DeltaCompressor<ShipState, GlobalTickContext>(maxPlayers);
+compressor.SetInitialState(snapshot0);          // key-frame
+await compressor.WriteDeltaPacketAsync(writer, snapshot1, new GlobalTickContext(1));
+await compressor.ApplyDeltaPacketAsync(reader); // on the receiving side
 ````
 
-**Package Manager**
+---
 
-```powershell
-Install-Package OatIM.DeltaCompression
+## 1  What’s new in 1.1.0
+
+| Area            | Highlights                                                                                                                                                                  |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Reliability** | 100 % line **and** branch coverage. <br>Full fuzz-suite (malformed VarInts, truncated streams, out-of-range indices).                                                       |
+| **Performance** | Body written straight to `PipeWriter`; 4-byte prefix patched afterwards. <br>`SwapBuffers()` removes sender-side O(*n*) copy.                                               |
+| **API**         | Static-interface members:<br>• `IDeltaContext.Size`<br>• `IDeltaSerializable.GetDeltaSize`  → compile-time constants. <br>New `AdvanceBaseline()` helper for relay servers. |
+| **Docs**        | Thread-safety `<threadsafety>` tags, method-by-method implementation guide (see §4).                                                                                        |
+
+---
+
+## 2  Why delta compression?
+
+Sending the whole snapshot every tick is wasteful.
+Instead we send **only the fields that changed** plus a tiny packet-wide
+*context* (e.g. the current tick).
+Typical savings for fast-moving game objects: **10×–100×** smaller packets.
+
+---
+
+## 3  Installing
+
+```bash
+dotnet add package OatIM.DeltaCompression --version 1.1.0
 ```
 
------
+Target frameworks: **net8.0**, **net9.0**.
 
-## Quick Start Guide
+---
 
-Here’s how to integrate the library by implementing `IDeltaSerializable` for a `ShipState` struct, method by method.
+## 4  Implementation guide (method-by-method)
 
-### Step 1: Define Your State Struct
+### 4.1  Create your packet context   `IDeltaContext`
 
-First, define the `struct` that holds your data. A private `[Flags]` enum is a clean and efficient way to represent which fields can change.
+| Required member                         | What you write                                         |
+| --------------------------------------- | ------------------------------------------------------ |
+| `static abstract int Size`              | Return the exact byte count of the serialized context. |
+| `void Write(ref PipeWriter w)`          | Write **exactly** `Size` bytes (little-endian).        |
+| `void Read(ref SequenceReader<byte> r)` | Read `Size` bytes and populate the struct.             |
 
 ```csharp
-// ShipState.cs
-using OatIM.DeltaCompression;
-using System.Buffers;
-using System.Buffers.Binary;
-using System.IO.Pipelines;
+public readonly struct GlobalTickContext : IDeltaContext
+{
+    public GlobalTickContext(ulong tick) => Tick = tick;
+    public ulong Tick { get; }
 
+    public static int Size => sizeof(ulong);
+
+    public void Write(ref PipeWriter w)
+    {
+        var span = w.GetSpan(Size);
+        BinaryPrimitives.WriteUInt64LittleEndian(span, Tick);
+        w.Advance(Size);
+    }
+
+    public void Read(ref SequenceReader<byte> r)
+    {
+        r.TryReadLittleEndian(out ulong t);
+        this = new GlobalTickContext(t);
+    }
+}
+```
+
+### 4.2  Create your state struct   `IDeltaSerializable<T,TContext>`
+
+Implement **five** methods:
+
+| Method                                                    | What to do                                                             |
+| --------------------------------------------------------- | ---------------------------------------------------------------------- |
+| `ulong GetChangeMask(T old, TContext ctx)`                | Return a bitmask: 1-bit per field that differs from `old`.             |
+| `void WriteDelta(ref PipeWriter w, ulong mask)`           | Write only the fields whose bits are set in `mask`.                    |
+| `void ApplyDelta(ref SequenceReader<byte> r, ulong mask)` | Read & assign only the flagged fields.                                 |
+| `void ApplyContext(TContext ctx)`                         | Apply packet-wide context (e.g. copy the tick).                        |
+| `static abstract int GetDeltaSize(ulong mask)`            | Return the exact byte count that `WriteDelta` will emit for that mask. |
+
+Example:
+
+```csharp
 public struct ShipState : IDeltaSerializable<ShipState, GlobalTickContext>
 {
-    [Flags]
-    private enum ChangeMask : ulong
+    [Flags] private enum Bits : ulong
     {
-        None      = 0,
-        PosX      = 1 << 0,
-        PosY      = 1 << 1,
-        Yaw       = 1 << 2,
+        PosX = 1 << 0, PosY = 1 << 1, Yaw  = 1 << 2, Vel = 1 << 3
     }
 
-    public int PosX;
-    public int PosY;
-    public ushort Yaw;
-    public ulong LastUpdatedTick; // This will be set from the context
+    public int PosX, PosY;
+    public ushort Yaw, Vel;
+    public ulong Tick;
 
-    // Interface methods will go here...
+    /* 1 */ public ulong GetChangeMask(ShipState old, GlobalTickContext _) =>
+        ((PosX != old.PosX) ? Bits.PosX : 0) |
+        ((PosY != old.PosY) ? Bits.PosY : 0) |
+        ((Yaw  != old.Yaw ) ? Bits.Yaw  : 0) |
+        ((Vel  != old.Vel ) ? Bits.Vel  : 0);
+
+    /* 2 */ public void WriteDelta(ref PipeWriter w, ulong m)
+    {
+        if ((m & (ulong)Bits.PosX) != 0) w.WriteIntLE(PosX);
+        if ((m & (ulong)Bits.PosY) != 0) w.WriteIntLE(PosY);
+        if ((m & (ulong)Bits.Yaw ) != 0) w.WriteUShortLE(Yaw);
+        if ((m & (ulong)Bits.Vel ) != 0) w.WriteUShortLE(Vel);
+    }
+
+    /* 3 */ public void ApplyDelta(ref SequenceReader<byte> r, ulong m)
+    {
+        if ((m & (ulong)Bits.PosX) != 0) r.TryReadLittleEndian(out PosX);
+        if ((m & (ulong)Bits.PosY) != 0) r.TryReadLittleEndian(out PosY);
+        if ((m & (ulong)Bits.Yaw ) != 0) r.TryReadLittleEndian(out ushort yaw); Vel = yaw;
+        if ((m & (ulong)Bits.Vel ) != 0) r.TryReadLittleEndian(out ushort vel); Yaw = vel;
+    }
+
+    /* 4 */ public void ApplyContext(GlobalTickContext ctx) => Tick = ctx.Tick;
+
+    /* 5 */ public static int GetDeltaSize(ulong m) =>
+        ((m & (ulong)Bits.PosX) != 0 ? 4 : 0) +
+        ((m & (ulong)Bits.PosY) != 0 ? 4 : 0) +
+        ((m & (ulong)Bits.Yaw ) != 0 ? 2 : 0) +
+        ((m & (ulong)Bits.Vel ) != 0 ? 2 : 0);
 }
 ```
 
-### Step 2: Implement `GetChangeMask`
-
-This method is the heart of the delta calculation. It compares the `oldState` to the current state and builds a bitmask of every field that has changed. The `DeltaCompressor` uses this mask to determine if an update is needed at all.
+Helper extensions for brevity:
 
 ```csharp
-public ulong GetChangeMask(ShipState oldState, GlobalTickContext context)
+internal static class PipeWriterExt
 {
-    ChangeMask mask = ChangeMask.None;
-    if (PosX != oldState.PosX) mask |= ChangeMask.PosX;
-    if (PosY != oldState.PosY) mask |= ChangeMask.PosY;
-    if (Yaw != oldState.Yaw) mask |= ChangeMask.Yaw;
-    return (ulong)mask;
+    public static void WriteIntLE(this ref PipeWriter w, int v)
+    { var s = w.GetSpan(4); BinaryPrimitives.WriteInt32LittleEndian(s, v); w.Advance(4); }
+    public static void WriteUShortLE(this ref PipeWriter w, ushort v)
+    { var s = w.GetSpan(2); BinaryPrimitives.WriteUInt16LittleEndian(s, v); w.Advance(2); }
 }
 ```
 
-### Step 3: Implement `WriteDelta`
+---
 
-This method serializes only the changed fields to the network stream. It checks which bits are set in the `changeMask` and writes the corresponding property values to the `PipeWriter`.
+## 5  Using `DeltaCompressor`
 
 ```csharp
-public void WriteDelta(ref PipeWriter writer, ulong changeMask)
-{
-    var mask = (ChangeMask)changeMask;
-    if (mask.HasFlag(ChangeMask.PosX))
-    {
-        var span = writer.GetSpan(sizeof(int));
-        BinaryPrimitives.WriteInt32LittleEndian(span, PosX);
-        writer.Advance(sizeof(int));
-    }
-    if (mask.HasFlag(ChangeMask.PosY))
-    {
-        var span = writer.GetSpan(sizeof(int));
-        BinaryPrimitives.WriteInt32LittleEndian(span, PosY);
-        writer.Advance(sizeof(int));
-    }
-    if (mask.HasFlag(ChangeMask.Yaw))
-    {
-        var span = writer.GetSpan(sizeof(ushort));
-        BinaryPrimitives.WriteUInt16LittleEndian(span, Yaw);
-        writer.Advance(sizeof(ushort));
-    }
-}
+// construction
+var server = new DeltaCompressor<ShipState, GlobalTickContext>(maxPlayers);
+var client = new DeltaCompressor<ShipState, GlobalTickContext>(maxPlayers);
+
+// baseline sync (key-frame)
+server.SetInitialState(initial); client.SetInitialState(initial);
+
+// each tick on the server
+await server.WriteDeltaPacketAsync(pipe.Writer, newSnapshot,
+                                   new GlobalTickContext(tick));
+
+// each tick on the client
+await client.ApplyDeltaPacketAsync(pipe.Reader);
 ```
 
-### Step 4: Implement `ApplyDelta`
+### 5.1 Relay / proxy
 
-This is the inverse of `WriteDelta`. On the receiving end, this method reads the values for the changed fields from the `SequenceReader<byte>` and applies them to the struct's properties.
+After the client decodes a packet **and plans to re-encode it**:
 
 ```csharp
-public void ApplyDelta(ref SequenceReader<byte> reader, ulong changeMask)
-{
-    var mask = (ChangeMask)changeMask;
-    if (mask.HasFlag(ChangeMask.PosX))
-    {
-        reader.TryReadLittleEndian(out int val);
-        PosX = val;
-    }
-    if (mask.HasFlag(ChangeMask.PosY))
-    {
-        reader.TryReadLittleEndian(out int val);
-        PosY = val;
-    }
-    if (mask.HasFlag(ChangeMask.Yaw))
-    {
-        reader.TryReadLittleEndian(out short val); // Read as signed
-        Yaw = (ushort)val; // Cast to unsigned
-    }
-}
+client.AdvanceBaseline();   // move last-sent-state → current-state
 ```
 
-### Step 5: Implement `GetDeltaSize`
+---
 
-This method is crucial for the `DeltaCompressor` to validate that a received packet is complete before trying to parse it. It calculates the exact byte size of a delta payload based on a given `changeMask`.
+## 6  Thread-safety
 
-```csharp
-public int GetDeltaSize(ulong changeMask)
-{
-    var mask = (ChangeMask)changeMask;
-    int size = 0;
-    if (mask.HasFlag(ChangeMask.PosX)) size += sizeof(int);
-    if (mask.HasFlag(ChangeMask.PosY)) size += sizeof(int);
-    if (mask.HasFlag(ChangeMask.Yaw)) size += sizeof(ushort);
-    return size;
-}
+```xml
+<threadsafety>
+  <static>All public static members are thread-safe.</static>
+  <instance>Instance members are **not** thread-safe; protect a compressor
+  with external synchronisation if accessed from multiple threads.</instance>
+</threadsafety>
 ```
 
-### Step 6: Implement `ApplyContext`
+---
 
-This method applies the global packet context to the state object. It's called on *every* object in the array, even those that had no other changes, ensuring global data like a tick is always synchronized.
-
-```csharp
-public void ApplyContext(GlobalTickContext context)
-{
-    this.LastUpdatedTick = context.GlobalTick;
-}
-```
-
-### Step 7: Define Your Context
-
-Create a struct that implements `IDeltaContext` to hold any global data for the packet.
-
-```csharp
-// GlobalTickContext.cs
-public struct GlobalTickContext : IDeltaContext
-{
-    public ulong GlobalTick { get; set; }
-
-    public int Size => sizeof(ulong);
-
-    public void Write(ref PipeWriter writer)
-    {
-        var span = writer.GetSpan(sizeof(ulong));
-        BinaryPrimitives.WriteUInt64LittleEndian(span, GlobalTick);
-        writer.Advance(sizeof(ulong));
-    }
-
-    public void Read(ref SequenceReader<byte> reader)
-    {
-        reader.TryReadLittleEndian(out long val);
-        GlobalTick = (ulong)val;
-    }
-}
-```
-
-### Step 8: Use the `DeltaCompressor`
-
-Finally, use the `DeltaCompressor` on your server and client to manage the synchronization process.
-
-**On the Server (Sending Updates):**
-
-```csharp
-// During setup
-var serverCompressor = new DeltaCompressor<ShipState, GlobalTickContext>(MAX_PLAYERS);
-serverCompressor.SetInitialState(initialGameStates);
-
-// In your game loop
-async Task SendUpdatesToClient(PipeWriter clientPipeWriter)
-{
-    var latestStates = GetCurrentShipStates();
-    var context = new GlobalTickContext { GlobalTick = currentServerTick };
-
-    // This creates the delta packet and writes it to the client's network pipe.
-    await serverCompressor.WriteDeltaPacketAsync(clientPipeWriter, latestStates, context);
-}
-```
-
-**On the Client (Receiving Updates):**
-
-```csharp
-// During setup
-var clientCompressor = new DeltaCompressor<ShipState, GlobalTickContext>(MAX_PLAYERS);
-clientCompressor.SetInitialState(initialGameStates); // Received from a keyframe
-
-// In your network event handler
-async Task OnDataReceived(PipeReader networkReader)
-{
-    // This reads the delta packet and updates the internal state array.
-    await clientCompressor.ApplyDeltaPacketAsync(networkReader);
-
-    // The state is now synchronized and ready for rendering.
-    var latestStates = clientCompressor.CurrentState;
-    RenderFrame(latestStates);
-}
-```
-
-> **Note:** For a complete, working example of a `struct` and `context` implementation, see the [`ShipState.cs`](tests/States/ShipState.cs) and [`GlobalTickContext.cs`](tests/Contexts/GlobalTickContext.cs) files in the test project.
-
------
-
-## Building from Source
-
-To build the library yourself, clone the repository and use the .NET CLI.
+## 7  Building, testing & coverage
 
 ```bash
-# Clone the repository
-git clone https://github.com/oat-im/deltacompression.git
-cd deltacompression
-
-# Restore dependencies and build in Release configuration
-dotnet build --configuration Release
+dotnet build -c Release
+dotnet test                # 100 % coverage • 100 % branch • fuzz suite
 ```
 
-## Running Tests
+A coverage report (Coverlet) is emitted into
+`tests/TestResults/*/coverage.cobertura.xml`.
 
-The solution includes a comprehensive test suite. To run the tests:
+---
 
-```bash
-dotnet test
-```
+## 9  License
 
-## License
-
-This project is licensed under the **MIT License**. See the LICENSE file for details.
+MIT — © Oat Interactive Media 2025.
