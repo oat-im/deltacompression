@@ -40,7 +40,7 @@ Typical savings for fast-moving game objects: **10×–100×** smaller packets.
 dotnet add package OatIM.DeltaCompression --version 1.1.0
 ```
 
-Target frameworks: **net8.0**, **net9.0**.
+Target framework(s): **net9.0**.
 
 ---
 
