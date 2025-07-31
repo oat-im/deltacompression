@@ -1,5 +1,5 @@
-# OatIM.DeltaCompression · **v1.1.0**
-<sub>Fast, allocation-free delta compression for .NET 9+</sub>
+# OatIM.DeltaCompression · **v1.1.01**
+<sub>Fast, allocation-free delta compression for .NET 8+</sub>
 
 ---
 
@@ -14,7 +14,7 @@ await compressor.ApplyDeltaPacketAsync(reader); // on the receiving side
 
 ---
 
-## 1  What’s new in 1.1.0
+## 1  What’s new in 1.1.x
 
 | Area            | Highlights                                                                                                                                                                  |
 | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -37,10 +37,10 @@ Typical savings for fast-moving game objects: **10×–100×** smaller packets.
 ## 3  Installing
 
 ```bash
-dotnet add package OatIM.DeltaCompression --version 1.1.0
+dotnet add package OatIM.DeltaCompression --version 1.1.1
 ```
 
-Target framework(s): **net9.0**.
+Target framework(s): **net8.0**, **net9.0**.
 
 ---
 
