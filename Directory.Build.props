@@ -1,0 +1,16 @@
+<Project>
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0</TargetFrameworks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <Authors>Oat Interactive Media</Authors>
+    <Company>Oat Interactive Media</Company>
+    <Copyright>Copyright (c) Oat Interactive Media 2025</Copyright>
+    <RepositoryUrl>https://github.com/oat-im/deltacompression</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/oat-im/deltacompression</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+</Project>

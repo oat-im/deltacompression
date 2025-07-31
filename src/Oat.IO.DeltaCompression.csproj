@@ -1,0 +1,20 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>true</IsPackable>
+    <Description>
+      A generic, high-performance .NET library for delta-compressing arrays of state objects,
+      designed for use with System.IO.Pipelines.
+    </Description>
+    <PackageTags>delta-compression;networking;gamedev;pipelines;binary;serialization</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\"/>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.IO.Pipelines" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
