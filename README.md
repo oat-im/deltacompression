@@ -1,5 +1,5 @@
 # OatIM.DeltaCompression · **v1.1.0**
-<sub>Fast, allocation-free delta compression for .NET 8 + 9</sub>
+<sub>Fast, allocation-free delta compression for .NET 9+</sub>
 
 ---
 
