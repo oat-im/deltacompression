@@ -61,10 +61,10 @@ public struct ShipState : IDeltaSerializable<ShipState, GlobalTickContext>
     
     public void ApplyContext(GlobalTickContext context)
     {
-        this.Tick = context.GlobalTick;
+        Tick = context.GlobalTick;
     }
 
-    public int GetDeltaSize(ulong changeMask)
+    public static int GetDeltaSize(ulong changeMask)
     {
         var mask = (ChangeMask)changeMask;
         int size = 0;

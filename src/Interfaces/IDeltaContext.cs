@@ -13,7 +13,7 @@ public interface IDeltaContext
     /// Gets the exact size of the context in bytes when it is serialized.
     /// This is crucial for the reader to validate that a packet is complete enough to be parsed.
     /// </summary>
-    int Size { get; }
+    static abstract int Size { get; }
 
     /// <summary>
     /// Writes the context's data to the provided PipeWriter.

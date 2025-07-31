@@ -4,10 +4,9 @@ using System.IO.Pipelines;
 
 namespace OatIM.DeltaCompression.Tests;
 
-[TestClass]
 public class DeltaCompressorTests
 {
-    [TestMethod]
+    [Fact]
     public async Task FullSynchronization_AppliesDeltasAndContextCorrectly()
     {
         // Arrange
@@ -28,9 +27,9 @@ public class DeltaCompressorTests
         serverStateTick2[5] = new ShipState { PosX = 100, PosY = -50, Yaw = 250, Vel = 1500, InputMask = 1 };
         serverStateTick2[42] = new ShipState { Yaw = 900, InputMask = 2 };
         serverStateTick2[99].Vel = 50;
-        
+
         var context2 = new GlobalTickContext { GlobalTick = 2 };
-        for(int i = 0; i < serverStateTick2.Length; i++)
+        for (int i = 0; i < serverStateTick2.Length; i++)
         {
             serverStateTick2[i].Tick = context2.GlobalTick;
         }
@@ -46,16 +45,16 @@ public class DeltaCompressorTests
         {
             var expected = serverStateTick2[i];
             var actual = clientCompressor.CurrentState[i];
-            Assert.AreEqual(expected.Tick, actual.Tick, $"Tick mismatch for player {i}");
-            Assert.AreEqual(expected.PosX, actual.PosX, $"PosX mismatch for player {i}");
-            Assert.AreEqual(expected.PosY, actual.PosY, $"PosY mismatch for player {i}");
-            Assert.AreEqual(expected.Yaw, actual.Yaw, $"Yaw mismatch for player {i}");
-            Assert.AreEqual(expected.Vel, actual.Vel, $"Vel mismatch for player {i}");
-            Assert.AreEqual(expected.InputMask, actual.InputMask, $"InputMask mismatch for player {i}");
+            Assert.Equal(expected.Tick, actual.Tick);
+            Assert.Equal(expected.PosX, actual.PosX);
+            Assert.Equal(expected.PosY, actual.PosY);
+            Assert.Equal(expected.Yaw, actual.Yaw);
+            Assert.Equal(expected.Vel, actual.Vel);
+            Assert.Equal(expected.InputMask, actual.InputMask);
         }
     }
 
-    [TestMethod]
+    [Fact]
     public async Task NoChanges_ProducesEmptyDeltaPayload()
     {
         // Arrange
@@ -74,6 +73,37 @@ public class DeltaCompressorTests
 
         // Assert
         // The buffer should only contain the context, as there are no deltas.
-        Assert.AreEqual(context.Size, result.Buffer.Length);
+        // The first byte should be the length of the context and the length of the header (4 bytes).
+        var buffer = result.Buffer;
+        Assert.True(buffer.Length > 0, "Buffer should not be empty");
+        Assert.Equal(GlobalTickContext.Size + sizeof(uint), buffer.Length);
+    }
+
+    [Fact]
+    public async Task TestOverflowException_VarIntEncoding()
+    {
+        // We will ensure that we properly throw an overflow exception when the VarInt exceeds the maximum size.
+        var compressor = new DeltaCompressor<ShipState, GlobalTickContext>(1);
+
+        // Build a packet: [length=12] [context (8 bytes of zeros)]
+        // followed by an over-long var-int (11×0xFF + 0x01).
+        byte[] packet = {
+            12, 0, 0, 0,                          // length prefix
+            0,0,0,0, 0,0,0,0,                     // dummy context
+            0xFF,0xFF,0xFF,0xFF,0xFF,             // 11 bytes >= 0x80
+            0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,
+            0x01                                   // terminator
+        };
+
+        var pipe = new Pipe();
+        await pipe.Writer.WriteAsync(packet);
+        await pipe.Writer.CompleteAsync();
+
+        // Act / Assert
+        await Assert.ThrowsAsync<OverflowException>(async () =>
+        {
+            var reader = pipe.Reader;
+            await compressor.ApplyDeltaPacketAsync(reader);
+        });
     }
 }

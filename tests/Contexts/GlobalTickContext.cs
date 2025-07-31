@@ -11,7 +11,7 @@ public struct GlobalTickContext : IDeltaContext
 {
     public ulong GlobalTick { get; set; }
 
-    public int Size => sizeof(ulong);
+    public static int Size => sizeof(ulong);
 
     public void Write(ref PipeWriter writer)
     {
@@ -23,6 +23,6 @@ public struct GlobalTickContext : IDeltaContext
     public void Read(ref SequenceReader<byte> reader)
     {
         reader.TryReadLittleEndian(out long tick);
-        GlobalTick = (ulong)tick;
+        GlobalTick = unchecked((ulong)tick);
     }
 }

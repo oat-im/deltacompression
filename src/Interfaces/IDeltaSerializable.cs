@@ -47,5 +47,5 @@ public interface IDeltaSerializable<T, TContext>
     /// </summary>
     /// <param name="changeMask">The change mask to calculate the size for.</param>
     /// <returns>The exact size in bytes of the delta payload.</returns>
-    int GetDeltaSize(ulong changeMask);
+    static abstract int GetDeltaSize(ulong changeMask);
 }
