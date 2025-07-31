@@ -12,8 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # This matrix now explicitly defines the SDK version for each target framework,
-        # avoiding invalid expression syntax.
+        # This matrix now explicitly defines the SDK version for each target framework.
         include:
           - target-framework: 'net8.0'
             sdk-version: '8.0.x'
@@ -30,8 +29,9 @@ jobs:
         dotnet-version: ${{ matrix.sdk-version }}
 
     - name: Restore dependencies
-      # We explicitly tell restore which framework to target.
-      run: dotnet restore --framework ${{ matrix.target-framework }}
+      # Use `dotnet msbuild` with the -p:TargetFramework property to restore
+      # dependencies for only the specific framework in this job run.
+      run: dotnet msbuild -t:Restore -p:TargetFramework=${{ matrix.target-framework }}
 
     - name: Build
       # We build only for the specific framework of this matrix job.
