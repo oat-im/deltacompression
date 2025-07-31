@@ -8,15 +8,11 @@ on:
     branches: [ "main" ]
 
 jobs:
-#──────────────────────────────────────────────────────────────────────────────
-# Build & test on both SDKs
-#──────────────────────────────────────────────────────────────────────────────
   build-and-test:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        sdk: ['8.0.x', '9.0.x']             # add more if you like
-    name: Build & Test (.NET ${{ matrix.sdk }})
+        sdk: ['8.0.x', '9.0.x']
 
     steps:
     - uses: actions/checkout@v4
@@ -26,30 +22,36 @@ jobs:
       with:
         dotnet-version: ${{ matrix.sdk }}
 
+    # ───────────────────────────────────────────────
+    # build only net8.0 on the 8-SDK, all TFM on 9-SDK
+    # ───────────────────────────────────────────────
     - name: Restore
-      run: dotnet restore
+      run: |
+        if [[ "${{ matrix.sdk }}" == "8.0.x" ]]; then
+          dotnet restore -p:TargetFramework=net8.0
+        else
+          dotnet restore
+        fi
 
     - name: Build
       run: |
         if [[ "${{ matrix.sdk }}" == "8.0.x" ]]; then
-          dotnet build --no-restore --configuration Release \
-                       -p:TargetFramework=net8.0        # 👈 build only net8
+          dotnet build --no-restore -c Release -p:TargetFramework=net8.0
         else
-          dotnet build --no-restore --configuration Release
+          dotnet build --no-restore -c Release
         fi
 
     - name: Test
       run: |
         if [[ "${{ matrix.sdk }}" == "8.0.x" ]]; then
-          dotnet test --no-build --configuration Release \
-                      --framework net8.0 --verbosity normal
+          dotnet test --no-build -c Release --framework net8.0
         else
-          dotnet test --no-build --configuration Release --verbosity normal
+          dotnet test --no-build -c Release
         fi
 
-#──────────────────────────────────────────────────────────────────────────────
-# Publish NuGet package (runs once, only on tag push)
-#──────────────────────────────────────────────────────────────────────────────
+# --------------------------------------------------------------------
+# Publish job unchanged (runs on .NET 9 SDK)
+# --------------------------------------------------------------------
   publish-to-nuget:
     name: Publish to NuGet.org
     runs-on: ubuntu-latest
@@ -68,11 +70,9 @@ jobs:
       run: |
         VERSION=${GITHUB_REF#refs/tags/v}
         dotnet pack src/OatIM.DeltaCompression.csproj \
-                    --configuration Release \
-                    /p:Version=$VERSION \
-                    --output ./nupkg
+                    -c Release /p:Version=$VERSION --output ./nupkg
 
     - name: Publish to NuGet.org
       run: dotnet nuget push "./nupkg/*.nupkg" \
               --api-key "${{ secrets.NUGET_API_KEY }}" \
-              --source "https://api.nuget.org/v3/index.json"
+              --source https://api.nuget.org/v3/index.json
