@@ -8,38 +8,26 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test on ${{ matrix.target-framework }}
+    name: Build & Test
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # This matrix now explicitly defines the SDK version for each target framework.
-        include:
-          - target-framework: 'net8.0'
-            sdk-version: '8.0.x'
-          - target-framework: 'net9.0'
-            sdk-version: '9.0.x'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup .NET ${{ matrix.sdk-version }}
+    - name: Setup .NET 9.0
       uses: actions/setup-dotnet@v4
       with:
-        dotnet-version: ${{ matrix.sdk-version }}
+        dotnet-version: '9.0.x'
 
     - name: Restore dependencies
-      # Use `dotnet msbuild` with the -p:TargetFramework property to restore
-      # dependencies for only the specific framework in this job run.
-      run: dotnet msbuild -t:Restore -p:TargetFramework=${{ matrix.target-framework }}
+      run: dotnet restore
 
     - name: Build
-      # We build only for the specific framework of this matrix job.
-      run: dotnet build --no-restore --configuration Release --framework ${{ matrix.target-framework }}
+      run: dotnet build --no-restore --configuration Release
 
     - name: Test
-      # We test only for the specific framework of this matrix job.
-      run: dotnet test --no-build --verbosity normal --configuration Release --framework ${{ matrix.target-framework }}
+      run: dotnet test --no-build --verbosity normal --configuration Release
 
   publish-to-nuget:
     name: Publish to NuGet.org
@@ -52,7 +40,6 @@ jobs:
     - name: Setup .NET
       uses: actions/setup-dotnet@v4
       with:
-        # Use the highest supported SDK for packing, as it can handle all target frameworks.
         dotnet-version: '9.0.x'
     - name: Create NuGet Package
       run: |
