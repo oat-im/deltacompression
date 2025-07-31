@@ -36,7 +36,7 @@ jobs:
     - name: Build
       run: |
         if [[ "${{ matrix.sdk }}" == "8.0.x" ]]; then
-          dotnet build --no-restore -c Release -p:TargetFramework=net8.0
+          dotnet build --no-restore -c Release -p:TargetFramework=net8.0 -p:EnablePreviewFeatures=true
         else
           dotnet build --no-restore -c Release
         fi
@@ -44,7 +44,7 @@ jobs:
     - name: Test
       run: |
         if [[ "${{ matrix.sdk }}" == "8.0.x" ]]; then
-          dotnet test --no-build -c Release --framework net8.0
+          dotnet test --no-build -c Release --framework net8.0 -p:EnablePreviewFeatures=true
         else
           dotnet test --no-build -c Release
         fi
