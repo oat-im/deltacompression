@@ -12,21 +12,25 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # The matrix now contains the full framework moniker, which we'll use in subsequent steps.
-        target-framework: ['net8.0', 'net9.0']
+        # This matrix now explicitly defines the SDK version for each target framework,
+        # avoiding invalid expression syntax.
+        include:
+          - target-framework: 'net8.0'
+            sdk-version: '8.0.x'
+          - target-framework: 'net9.0'
+            sdk-version: '9.0.x'
 
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Setup .NET for ${{ matrix.target-framework }}
+    - name: Setup .NET ${{ matrix.sdk-version }}
       uses: actions/setup-dotnet@v4
       with:
-        # We derive the SDK version (e.g., '8.0.x') from the target framework moniker.
-        dotnet-version: ${{ matrix.target-framework.replace('net', '') }}.x
+        dotnet-version: ${{ matrix.sdk-version }}
 
     - name: Restore dependencies
-      # We explicitly tell restore which framework to target, avoiding SDK version conflicts.
+      # We explicitly tell restore which framework to target.
       run: dotnet restore --framework ${{ matrix.target-framework }}
 
     - name: Build
@@ -56,3 +60,4 @@ jobs:
         dotnet pack src/Oat.IO.DeltaCompression.csproj --configuration Release --output ./nupkg /p:Version=$VERSION
     - name: Publish to NuGet.org
       run: dotnet nuget push "./nupkg/*.nupkg" --api-key ${{ secrets.NUGET_API_KEY }} --source "https://api.nuget.org/v3/index.json"
+
